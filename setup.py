@@ -8,7 +8,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name='momopy',
-    version='0.0.1',
+    version='0.0.3',
     description='Python wrapper for Mobile Money Providers',
     long_description=long_description,
     long_description_content_type='text/markdown',
