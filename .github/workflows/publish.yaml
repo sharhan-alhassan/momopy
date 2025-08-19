@@ -5,9 +5,9 @@ on:
     types: [published]
 
 permissions:
-    id-token: write
-    contents: read
-    
+  id-token: write
+  contents: read
+
 jobs:
   pypi:
     runs-on: ubuntu-latest
@@ -32,5 +32,5 @@ jobs:
 
       - name: Publish package
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+        # with:
+        #   password: ${{ secrets.PYPI_API_TOKEN }}
