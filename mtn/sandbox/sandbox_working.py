@@ -3,8 +3,6 @@ import requests
 import os
 from mtn.base import Base
 import mtn
-import base64
-from mtn.utils.logger import logger
 from datetime import datetime, timedelta
 
 class Sandbox(Base):
