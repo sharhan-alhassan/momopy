@@ -5,7 +5,7 @@ load_dotenv()
 
 # The MoMo API environment (sandbox or live)
 ENVIRONMENT = os.getenv("ENVIRONMENT", "sandbox")
-BASE_API_URL = os.getenv("BASE_API_URL", "https://sandbox.momodeveloper.mtn.com/")
+BASE_API_URL = os.getenv("BASE_API_URL", "https://sandbox.momodeveloper.mtn.com")
 CALLBACK_HOST = os.getenv("CALLBACK_HOST")
 
 

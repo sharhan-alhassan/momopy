@@ -1,24 +1,11 @@
-import requests
+from datetime import datetime, timedelta
 import uuid
-import mtn as mtnapi
-from mtn.utils.exceptions import MoMoAPIError
-from mtn.utils.logger import logger
+import requests
 
-class Borg:
+class Base:
     """
-    Borg class making class attributes global.
-    Implements the Borg design pattern which allows all instances to share state.
-    """
-    _shared_state = {}
-
-    def __init__(self):
-        self.__dict__ = self._shared_state
-
-
-class Base(Borg):
-    """
-    Base Class used across defined.
-    This class initializes the MTN MoMo API with the provided secret key.
+    Base Class used across all MTN MoMo models.
+    This class manages global state for tokens, API users, and API keys.
     
     Attributes:
         requests (MomoBaseRequests): An instance of the MomoBaseRequests class for making API requests.
@@ -28,181 +15,300 @@ class Base(Borg):
         """
         Initialize MTN MoMo with required credentials.
         """
-        # super().__init__()
-        Borg.__init__(self)
-
+        # Global state for token management
+        self._token = token
+        self._token_expiry_time = None
+        self._api_user = kwargs.get('api_user')
+        self._api_key = kwargs.get('api_key')
+        self._subscription_key = kwargs.get('subscription_key')
         
-        base_url = kwargs.get('base_url', mtnapi.BASE_API_URL)
-        environment = kwargs.get('environment', mtnapi.ENVIRONMENT)
-        callback_host = kwargs.get('callback_host', mtnapi.CALLBACK_HOST)
+        # Track if api_user was provided during initialization
+        self._api_user_provided = 'api_user' in kwargs
         
-        api_user = kwargs.get('api_user', mtnapi.PRODUCT_API_USER_ID)
-        api_key = kwargs.get('api_key', mtnapi.PRODUCT_API_SECRET)
-        subscription_key = kwargs.get('subscription_key', mtnapi.PRODUCT_SUBSCRIPTION_KEY)
-
-        auth_str = f'{api_user}:{api_key}'
-        # auth_bytes = auth_str.encode('utf-8')
-        # auth_base64 = base64.b64encode(auth_bytes).decode('utf-8')
-
-        headers = {
+        # Base configuration
+        self._base_url = kwargs.get('base_url', 'https://sandbox.momodeveloper.mtn.com')
+        self._environment = kwargs.get('environment', 'sandbox')
+        self._callback_host = kwargs.get('callback_host', 'webhook.site')
+        
+        # Initialize headers
+        self._headers = {
             'Content-Type': 'application/json',
-            'Ocp-Apim-Subscription-Key': subscription_key,
-            'X-Target-Environment': environment,
-            # 'X-Callback-Url': callback_host,
+            'X-Target-Environment': self._environment,
         }
-                
-        if token:
-            headers['Authorization'] = f'Bearer {token}'
         
-        arguments = dict(base_url=base_url, headers=headers)
-        if not hasattr(self, 'requests'):
-            req = MomoBaseRequests(**arguments)
-            self._shared_state.update(requests=req)
-        else:
-            self.requests.headers.update(headers)
-
-class MomoBaseRequests:
-    """
-    Handles HTTP requests to the MTN MoMo API.
-    
-    Args:
-        base_url (str): The base URL for the MoMo API.
-        environment (str): The environment to use (sandbox or live).
-        callback_host (str): The callback host URL.
-    """
-
-    def __init__(self, base_url, headers=None):
-        self.BASE_API_URL = base_url
-        self.headers = headers
-
-    def _request(self, method, resource_uri, **kwargs):
-        full_url = self.BASE_API_URL + resource_uri
-        
-        headers = self.headers.copy()  # Create a copy of the headers
-
-        # Add X-Reference-Id for POST requests
-        if method == requests.post:
-            headers['X-Reference-Id'] = str(uuid.uuid4())
+        if self._subscription_key:
+            self._headers['Ocp-Apim-Subscription-Key'] = self._subscription_key
             
-        logger.info(f"Making {method.__name__.upper()} request to: {full_url}")
-        # logger.info(f"Headers: {headers}")
-        # logger.info(f"kwargs: {kwargs}")
-        
-        """
-        Perform a HTTP request on a resource.
+        if self._token:
+            self._headers['Authorization'] = f'Bearer {self._token}'
 
+    @property
+    def token(self):
+        """Get current token if valid, otherwise return None"""
+        if self._token and self._token_expiry_time and self._token_expiry_time > datetime.now():
+            return self._token
+        return None
+
+    @property
+    def api_user(self):
+        """Get current API user"""
+        return self._api_user
+
+    @property
+    def api_key(self):
+        """Get current API key"""
+        return self._api_key
+
+    @property
+    def subscription_key(self):
+        """Get current subscription key"""
+        return self._subscription_key
+
+    def check_api_user_exists(self, api_user_id, subscription_key):
+        """
+        Check if an API user already exists.
+        
         Args:
-            method (function): HTTP method from requests (e.g., requests.get, requests.post).
-            resource_uri (str): The endpoint of the resource.
-            headers (dict): Headers for the request.
-
-        Keyword Args:
-            data (dict, optional): JSON data to send in the body of the request.
-            params (dict, optional): Query parameters to include in the URL.
-
-        Raises:
-            HTTPError: If the HTTP request returns an unsuccessful status code.
-
-        Returns:
-            dict: The JSON response from the API.
-        """
+            api_user_id (str): The API user ID to check
+            subscription_key (str): MTN MoMo subscription key
             
-        data = kwargs.get("data")
-        params = kwargs.get("params")
-
+        Returns:
+            bool: True if user exists, False otherwise
+        """
+        url = f"{self._base_url}/v1_0/apiuser/{api_user_id}"
+        headers = {
+            "Ocp-Apim-Subscription-Key": subscription_key,
+        }
+        
         try:
-            response = method(
-                self.BASE_API_URL + resource_uri,
-                json=data,
-                headers=headers,                    # Use the updated headers with X-Reference-Id
-                params=params
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.HTTPError as http_err:
-            # Log raw response content if JSON parsing fails
-            error_detail = response.text if response.content else "No content"
-            logger.error(f"HTTP error occurred: {http_err}")
-            logger.error(f"Status Code: {response.status_code}")
-            logger.error(f"Response Content: {error_detail}")
-            raise MoMoAPIError(
-                status_code=response.status_code,
-                error_message=str(http_err),
-                details=error_detail
-            ) from http_err
-        except requests.exceptions.RequestException as req_err:
-            logger.error(f"Request error occurred: {req_err}")
-            logger.error(f"Response Content: {response.text if response.content else 'No content'}")
-            raise MoMoAPIError(
-                status_code=None,
-                error_message="Request failed",
-                details=str(req_err)
-            ) from req_err
+            resp = requests.get(url, headers=headers)
+            if resp.status_code == 200:
+                print(f"✅ API User {api_user_id} already exists")
+                return True
+            elif resp.status_code == 404:
+                print(f"ℹ️ API User {api_user_id} does not exist")
+                return False
+            else:
+                print(f"❌ Error checking API user: {resp.status_code} - {resp.text}")
+                return False
+        except Exception as e:
+            print(f"❌ Error checking API user: {e}")
+            return False
 
-
-    def get(self, endpoint, **kwargs):
+    def _create_api_user(self, subscription_key):
         """
-        Send a GET request to a resource.
-
-        Args:
-            endpoint (str): The endpoint of the resource.
-            primary_key (str): Subscription primary key.
-
-        Keyword Args:
-            params (dict, optional): Query parameters to include in the URL.
-
-        Returns:
-            dict: The JSON response from the API.
+        Create an API user in the MTN MoMo Sandbox environment.
+        Only creates if the user doesn't already exist.
         """
-        return self._request(requests.get, endpoint, **kwargs)
-
-    def post(self, endpoint, **kwargs):
-        """
-        Send a POST request to create a resource.
-
-        Args:
-            endpoint (str): The endpoint of the resource.
-            primary_key (str): Subscription primary key.
+        # If we already have an API user, check if it exists
+        if self._api_user:
+            if self.check_api_user_exists(self._api_user, subscription_key):
+                print(f"✅ Using existing API User: {self._api_user}")
+                return True
+            else:
+                print(f"ℹ️ API User {self._api_user} does not exist, creating it...")
+                # Keep the existing UUID, don't generate a new one
+        else:
+            # Only generate new UUID if none was provided
+            self._api_user = str(uuid.uuid4())
+            print(f"🔄 Creating new API User: {self._api_user}")
         
-        Keyword Args:
-            data (dict, optional): JSON data to send in the body of the request.
-
-        Returns:
-            dict: The JSON response from the API.
-        """
-        return self._request(requests.post, endpoint, **kwargs)
-
-    def put(self, endpoint, **kwargs):
-        """
-        Send a PUT request to update a resource.
-
-        Args:
-            endpoint (str): The endpoint of the resource.
-            primary_key (str): Subscription primary key.
+        url = f"{self._base_url}/v1_0/apiuser"
+        headers = {
+            "X-Reference-Id": self._api_user,
+            "Ocp-Apim-Subscription-Key": subscription_key,
+            "Content-Type": "application/json"
+        }
+        body = {
+            "providerCallbackHost": self._callback_host
+        }
         
-        Keyword Args:
-            data (dict, optional): JSON data to send in the body of the request.
+        try:
+            resp = requests.post(url, json=body, headers=headers)
+            if resp.status_code == 201:
+                print(f"✅ API User created successfully: {self._api_user}")
+                return True
+            elif resp.status_code == 409:
+                print(f"❌ 409: API User {self._api_user} already exists")
+                print("This means the UUID was already used. Generating new UUID...")
+                # Try with a new UUID only if we didn't have a specific one
+                if not self._api_user_provided:
+                    return self._create_api_user(subscription_key)
+                else:
+                    print("❌ Cannot create API user with specified UUID - it already exists")
+                    return False
+            elif resp.status_code == 401:
+                print(f"❌ 401: {resp.text}")
+                print("Ensure the subscription key is the primary")
+                return False
+            elif resp.status_code == 400:
+                print(f"❌ 400: {resp.text}")
+                print("Ensure API User(X-Reference-Id) is UUID Version 4")
+                return False
+            else:
+                print(f"❌ {resp.status_code}: {resp.text}")
+                return False
+        except Exception as e:
+            print(f"❌ Error creating API user: {e}")
+            return False
 
-        Returns:
-            dict: The JSON response from the API.
+    def _create_api_key(self, subscription_key):
         """
-        return self._request(requests.put, endpoint, **kwargs)
-
-    def delete(self, endpoint, **kwargs):
+        Create an API key for the API user.
+        Only creates if the key doesn't already exist.
         """
-        Send a DELETE request to remove a resource.
+        if not self._api_user:
+            print("❌ API User not created. Create API user first.")
+            return False
+            
+        # Check if we already have an API key
+        if self._api_key:
+            print(f"✅ Using existing API Key: {self._api_key}")
+            return True
+            
+        url = f"{self._base_url}/v1_0/apiuser/{self._api_user}/apikey"
+        headers = {
+            "Ocp-Apim-Subscription-Key": subscription_key,
+        }
+        
+        try:
+            resp = requests.post(url, headers=headers)
+            if resp.status_code == 201:
+                response = resp.json()
+                self._api_key = response.get('apiKey')
+                print(f"✅ API Key generated successfully: {self._api_key}")
+                return True
+            elif resp.status_code == 400:
+                print(f"❌ 400: {resp.text}")
+                print("Validate the BaseURL and ensure API_User is created")
+                return False
+            elif resp.status_code == 404:
+                print(f"❌ 404: {resp.text}")
+                print("API_USER was not created. Create API user first.")
+                return False
+            else:
+                print(f"❌ {resp.status_code}: {resp.text}")
+                return False
+        except Exception as e:
+            print(f"❌ Error generating API key: {e}")
+            return False
 
+    def _generate_token(self, subscription_key, product='collection'):
+        """
+        Generate token for a specific product.
+        """
+        if not self._api_user or not self._api_key:
+            print("❌ API User and API Key must be created first")
+            return None
+            
+        endpoint = f"{self._base_url}/{product}/token/"
+        headers = {
+            "Ocp-Apim-Subscription-Key": subscription_key,
+        }
+        
+        try:
+            resp = requests.post(endpoint, auth=(self._api_user, self._api_key), headers=headers)
+            response = resp.json()
+            
+            if resp.status_code == 200:
+                self._token = response.get('access_token')
+                token_expiry = response.get('expires_in')
+                self._token_expiry_time = datetime.now() + timedelta(seconds=int(token_expiry))
+                print(f"✅ Token generated successfully, expires at: {self._token_expiry_time}")
+                return self._token
+            elif resp.status_code == 500 or response.get("error") == "login_failed":
+                print(f"❌ 500: {response}")
+                print("Ensure API User and API Key are mapped correctly")
+                return None
+            else:
+                print(f"❌ {resp.status_code}: {resp.text}")
+                return None
+        except Exception as e:
+            print(f"❌ Error generating token: {e}")
+            return None
+
+    def get_api_user_info(self, api_user_id, subscription_key):
+        """
+        Get detailed information about an existing API user.
+        
         Args:
-            endpoint (str): The endpoint of the resource.
-            primary_key (str): Subscription primary key.
-
-        Keyword Args:
-            params (dict, optional): Query parameters to include in the URL.
-
+            api_user_id (str): The API user ID to retrieve
+            subscription_key (str): MTN MoMo subscription key
+            
         Returns:
-            dict: The JSON response from the API indicating the result of the delete operation.
-
-        Raises:
-            HTTPError: If the HTTP request returns an unsuccessful status code.
+            dict: API user information if successful, None otherwise
         """
-        return self._request(requests.delete, endpoint, **kwargs)
+        url = f"{self._base_url}/v1_0/apiuser/{api_user_id}"
+        headers = {
+            "Ocp-Apim-Subscription-Key": subscription_key,
+        }
+        
+        try:
+            resp = requests.get(url, headers=headers)
+            if resp.status_code == 200:
+                user_info = resp.json()
+                print(f"✅ Retrieved API User info: {user_info}")
+                return user_info
+            elif resp.status_code == 404:
+                print(f"ℹ️ API User {api_user_id} not found")
+                return None
+            else:
+                print(f"❌ Error retrieving API user: {resp.status_code} - {resp.text}")
+                return None
+        except Exception as e:
+            print(f"❌ Error retrieving API user: {e}")
+            return None
+
+    def setup_api_credentials(self, subscription_key, api_user_id=None, api_key=None):
+        """
+        Set up API credentials with proper lifecycle management.
+        
+        Args:
+            subscription_key (str): MTN MoMo subscription key
+            api_user_id (str, optional): Existing API user ID to reuse
+            api_key (str, optional): Existing API key to reuse
+            
+        Returns:
+            bool: True if setup successful, False otherwise
+        """
+        print("🔄 Setting up API credentials...")
+        
+        # If provided with existing credentials, verify they work
+        if api_user_id and api_key:
+            self._api_user = api_user_id
+            self._api_key = api_key
+            
+            # Test if the credentials work by trying to generate a token
+            test_token = self._generate_token(subscription_key, 'collection')
+            if test_token:
+                print("✅ Existing API credentials verified and working")
+                return True
+            else:
+                print("❌ Existing API credentials failed verification")
+                # Fall back to creating new ones
+        
+        # Create new API user and key
+        if not self._create_api_user(subscription_key):
+            return False
+            
+        if not self._create_api_key(subscription_key):
+            return False
+            
+        print("✅ API credentials setup completed")
+        return True
+
+    def token_status(self):
+        """
+        Check token status and show expiry information.
+        """
+        if not self._token_expiry_time:
+            print("ℹ️ No token expiry time set. Generate a token first.")
+            return False
+            
+        if self._token_expiry_time > datetime.now():
+            remaining = self._token_expiry_time - datetime.now()
+            print(f"✅ Token valid, expires in: {remaining}")
+            return True
+        else:
+            print("❌ Token expired")
+            return False

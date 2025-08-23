@@ -4,6 +4,53 @@ class Disbursement(Base):
     """
     Disbursement class for interacting with MTN MoMo Disbursement API.
     """
+    
+    def __init__(self, token=None, **kwargs):
+        """
+        Initialize Disbursement with optional token and credentials.
+        
+        Args:
+            token (str, optional): Existing Bearer token
+            **kwargs: Additional arguments passed to Base class
+                - api_user: Custom API user ID
+                - api_key: Custom API key  
+                - subscription_key: MTN MoMo subscription key
+                - base_url: API base URL
+                - environment: Target environment (sandbox/production)
+                - callback_host: Callback host for webhooks
+        """
+        super().__init__(token=token, **kwargs)
+        
+        # Set default product for token generation
+        self._product = 'disbursement'
+
+    def generate_disbursement_token(self, subscription_key=None, api_user=None, api_key=None):
+        """
+        Generate disbursement token with smart caching.
+        If token exists and is valid, reuse it. Otherwise, generate new one.
+        
+        Args:
+            subscription_key (str, optional): MTN MoMo subscription key
+            api_user (str, optional): Custom API user ID (generates UUID if not provided)
+            api_key (str, optional): Custom API key
+            
+        Returns:
+            str: Valid Bearer token for disbursement API
+            
+        Raises:
+            ValueError: If subscription key is missing
+            Exception: If token generation fails
+        """
+        # Override product for disbursement
+        if not self._api_user or not self._api_key:
+            # Need to create API user and key first
+            if not self._create_api_user(subscription_key):
+                raise Exception("Failed to create API user")
+                
+            if not self._create_api_key(subscription_key):
+                raise Exception("Failed to create API key")
+        
+        return self._generate_token(subscription_key, 'disbursement')
 
     @classmethod
     def create_transfer(cls, **kwargs):
